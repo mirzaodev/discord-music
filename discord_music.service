@@ -1,0 +1,19 @@
+[Unit]
+Description=Discord Music Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mirza
+WorkingDirectory=/home/mirza/dev/discord-music
+ExecStart=/home/mirza/dev/discord-music/.venv/bin/python3 /home/mirza/dev/discord-music/bot.py
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

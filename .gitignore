@@ -1,0 +1,20 @@
+# Environment
+.env
+.env.example
+
+# Virtual environment
+.venv/
+
+# Database (runtime generated)
+music.db
+music.db-wal
+music.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# IDE
+.vscode/
+.idea/
