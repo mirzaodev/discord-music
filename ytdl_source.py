@@ -56,7 +56,7 @@ def _extract_and_download(query: str) -> dict:
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "opus",
-            "preferredquality": "128",
+            "preferredquality": "96",
         }],
     }
 
@@ -67,6 +67,28 @@ def _extract_and_download(query: str) -> dict:
     # yt-dlp may change extension after post-processing
     expected_path = str(cache_manager.CACHE_DIR / f"{file_hash}.opus")
     data["_downloaded_file"] = expected_path
+    return data
+
+
+def _download_single_track(url: str, output_path: str) -> dict:
+    """Download and encode a single track to a specific opus file path."""
+    # Strip extension — yt-dlp adds it via postprocessor
+    base = output_path.rsplit(".", 1)[0] if "." in output_path else output_path
+
+    opts = {
+        **_YTDL_OPTIONS,
+        "outtmpl": base + ".%(ext)s",
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "opus",
+            "preferredquality": "96",
+        }],
+    }
+
+    data = yt_dlp.YoutubeDL(opts).extract_info(url, download=True)
+    if data is None:
+        raise ValueError(f"Could not retrieve audio for: {url}")
+    data["_downloaded_file"] = base + ".opus"
     return data
 
 
@@ -109,10 +131,26 @@ class YTDLSource(discord.PCMVolumeTransformer):
         """
         loop = loop or asyncio.get_event_loop()
 
+        # 0. Direct local file path — used by /playlocal
+        if os.path.isfile(query):
+            print(f"[playback] LOCAL FILE: {query}")
+            return cls(
+                discord.FFmpegPCMAudio(query, **LOCAL_FFMPEG_OPTIONS),
+                data={
+                    "url": query,
+                    "webpage_url": query,
+                    "title": os.path.basename(query),
+                    "duration": 0,
+                    "thumbnail": "",
+                    "uploader": "",
+                },
+            )
+
         # 1. Cache hit — play from local file
         cached_path = cache_manager.get_cached_path(query)
         if cached_path:
             row = db.get_cached_track(query)
+            print(f"[playback] CACHE HIT: '{row['title']}' -> {cached_path}")
             data = {
                 "url": cached_path,
                 "webpage_url": query,
@@ -143,12 +181,13 @@ class YTDLSource(discord.PCMVolumeTransformer):
                     duration=int(data.get("duration") or 0),
                 )
                 data["url"] = downloaded_file
+                print(f"[playback] DOWNLOADED & CACHED: '{data.get('title', 'Unknown')}' -> {downloaded_file}")
                 return cls(
                     discord.FFmpegPCMAudio(downloaded_file, **LOCAL_FFMPEG_OPTIONS),
                     data=data,
                 )
         except Exception as exc:
-            print(f"[cache] Download failed, falling back to streaming: {exc}")
+            print(f"[playback] Download failed, falling back to streaming: {exc}")
 
         # 3. Fallback — stream from CDN
         data = await loop.run_in_executor(
@@ -156,6 +195,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         )
         if "entries" in data:
             data = data["entries"][0]
+        print(f"[playback] STREAMING: '{data.get('title', 'Unknown')}' from CDN")
         return cls(
             discord.FFmpegPCMAudio(data["url"], **FFMPEG_OPTIONS),
             data=data,

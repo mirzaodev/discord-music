@@ -51,6 +51,7 @@ async def main():
     async with bot:
         await bot.load_extension("cogs.music")
         await bot.load_extension("cogs.playlist")
+        await bot.load_extension("cogs.cache")
         await bot.start(config.DISCORD_TOKEN)
 
 
