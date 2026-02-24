@@ -38,6 +38,11 @@ FFMPEG_OPTIONS = {
     "options": "-vn",
 }
 
+def _is_url(query: str) -> bool:
+    """Return True if query looks like a URL rather than a search term."""
+    return query.startswith(("http://", "https://", "www."))
+
+
 def _extract_info_with_fallback(query: str) -> dict:
     """
     Try multiple yt-dlp option profiles to survive YouTube format/client
@@ -82,6 +87,20 @@ def _extract_info_with_fallback(query: str) -> dict:
             last_error = exc
             continue
 
+    # -- SoundCloud fallback for search queries --
+    if not _is_url(query):
+        sc_opts = copy.deepcopy(_YTDL_OPTIONS)
+        sc_opts["default_search"] = "scsearch"
+        sc_opts.pop("extractor_args", None)
+        sc_opts["format"] = "bestaudio/best"
+        try:
+            data = yt_dlp.YoutubeDL(sc_opts).extract_info(query, download=False)
+            if data:
+                data["_fallback_source"] = "SoundCloud"
+                return data
+        except Exception:
+            pass  # SoundCloud also failed, raise the original YouTube error
+
     if last_error:
         raise last_error
     raise ValueError(f"Could not retrieve audio for: {query}")
@@ -103,6 +122,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.duration: int = data.get("duration") or 0
         self.thumbnail: str = data.get("thumbnail", "")
         self.uploader: str = data.get("uploader", "Unknown")
+        self.source: str = data.get("_fallback_source", "YouTube")
 
     @classmethod
     async def from_query(
@@ -155,4 +175,5 @@ class YTDLSource(discord.PCMVolumeTransformer):
             "url": data.get("webpage_url") or data.get("url"),
             "duration": data.get("duration") or 0,
             "thumbnail": data.get("thumbnail", ""),
+            "source": data.get("_fallback_source", "YouTube"),
         }

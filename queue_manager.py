@@ -9,10 +9,11 @@ import discord
 @dataclass
 class SongEntry:
     title: str
-    url: str           # canonical YouTube watch URL (re-resolved fresh at play time)
+    url: str           # canonical watch URL (re-resolved fresh at play time)
     duration: int      # seconds
     requester: discord.Member
     thumbnail: Optional[str] = None
+    source: str = "YouTube"  # "YouTube" or "SoundCloud"
 
 
 class GuildQueue:

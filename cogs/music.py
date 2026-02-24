@@ -109,19 +109,23 @@ class Music(commands.Cog):
         vc = await self._get_voice_client(interaction, channel)
         gq = queue_manager.get(interaction.guild_id)
 
+        source = meta.get("source", "YouTube")
         entry = SongEntry(
             title=meta["title"],
             url=meta["url"],
             duration=meta["duration"],
             requester=interaction.user,
             thumbnail=meta.get("thumbnail"),
+            source=source,
         )
 
         gq.add(entry)
 
+        fallback_note = f"\n*(via {source})*" if source != "YouTube" else ""
+
         if vc.is_playing() or vc.is_paused():
             embed = discord.Embed(
-                description=f"Added to queue (#{len(gq)}): **{entry.title}**",
+                description=f"Added to queue (#{len(gq)}): **{entry.title}**{fallback_note}",
                 color=discord.Color.blurple(),
             )
             embed.add_field(name="Duration", value=_fmt_duration(entry.duration))
@@ -130,7 +134,7 @@ class Music(commands.Cog):
             await self._play_next(interaction.guild_id)
             embed = discord.Embed(
                 title="Now Playing",
-                description=f"**{entry.title}**",
+                description=f"**{entry.title}**{fallback_note}",
                 color=discord.Color.green(),
             )
             embed.add_field(name="Duration", value=_fmt_duration(entry.duration))
@@ -160,18 +164,22 @@ class Music(commands.Cog):
         vc = await self._get_voice_client(interaction, channel)
         gq = queue_manager.get(interaction.guild_id)
 
+        source = meta.get("source", "YouTube")
         entry = SongEntry(
             title=meta["title"],
             url=meta["url"],
             duration=meta["duration"],
             requester=interaction.user,
             thumbnail=meta.get("thumbnail"),
+            source=source,
         )
+
+        fallback_note = f"\n*(via {source})*" if source != "YouTube" else ""
 
         if vc.is_playing() or vc.is_paused():
             gq.add_next(entry)
             embed = discord.Embed(
-                description=f"Playing next: **{entry.title}**",
+                description=f"Playing next: **{entry.title}**{fallback_note}",
                 color=discord.Color.blurple(),
             )
             embed.add_field(name="Duration", value=_fmt_duration(entry.duration))
@@ -182,7 +190,7 @@ class Music(commands.Cog):
             await self._play_next(interaction.guild_id)
             embed = discord.Embed(
                 title="Now Playing",
-                description=f"**{entry.title}**",
+                description=f"**{entry.title}**{fallback_note}",
                 color=discord.Color.green(),
             )
             embed.add_field(name="Duration", value=_fmt_duration(entry.duration))
