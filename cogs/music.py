@@ -92,12 +92,54 @@ class Music(commands.Cog):
     # ------------------------------------------------------------------
 
     @app_commands.command(name="play", description="Play a song or add it to the queue")
-    @app_commands.describe(query="Song name or URL")
+    @app_commands.describe(query="Song name, URL, or playlist URL")
     async def play(self, interaction: discord.Interaction, query: str):
         await interaction.response.defer(thinking=True)
 
         channel = await self._ensure_voice(interaction)
         if channel is None:
+            return
+
+        # Detect playlist URLs (SoundCloud /sets/, YouTube /playlist, etc.)
+        is_playlist = "/sets/" in query or "playlist" in query
+
+        if is_playlist:
+            try:
+                tracks = await YTDLSource.fetch_playlist_metadata(
+                    query, loop=self.bot.loop
+                )
+            except ValueError as exc:
+                await interaction.followup.send(str(exc))
+                return
+
+            if not tracks:
+                await interaction.followup.send("No playable tracks found in that playlist.")
+                return
+
+            vc = await self._get_voice_client(interaction, channel)
+            gq = queue_manager.get(interaction.guild_id)
+            was_playing = vc.is_playing() or vc.is_paused()
+
+            for t in tracks:
+                gq.add(SongEntry(
+                    title=t["title"],
+                    url=t["url"],
+                    duration=t["duration"],
+                    requester=interaction.user,
+                    thumbnail=t.get("thumbnail"),
+                ))
+
+            if not was_playing:
+                await self._play_next(interaction.guild_id)
+
+            embed = discord.Embed(
+                description=(
+                    f"{'Added' if was_playing else 'Started playing'} "
+                    f"**{len(tracks)}** track(s) from playlist."
+                ),
+                color=discord.Color.green(),
+            )
+            await interaction.followup.send(embed=embed)
             return
 
         try:
