@@ -15,6 +15,85 @@ def _fmt_duration(seconds: int) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def _build_now_playing_embed(
+    song: SongEntry,
+    guild_id: int,
+    *,
+    paused: bool = False,
+) -> discord.Embed:
+    """Build a rich 'Now Playing' embed with song info and next-up."""
+    status = "\u23F8\uFE0F  Paused" if paused else "\u25B6\uFE0F  Now Playing"
+    embed = discord.Embed(
+        title=status,
+        description=f"**{song.title}**",
+        color=discord.Color.from_rgb(30, 215, 96),  # Spotify-ish green
+    )
+    embed.add_field(name="Duration", value=f"`{_fmt_duration(song.duration)}`", inline=True)
+    embed.add_field(name="Requested by", value=song.requester.mention, inline=True)
+
+    # Next song preview
+    gq = queue_manager.get(guild_id)
+    entries = gq.list_entries()
+    if entries:
+        nxt = entries[0]
+        embed.add_field(
+            name="Up Next",
+            value=f"{nxt.title}  `{_fmt_duration(nxt.duration)}`",
+            inline=False,
+        )
+    else:
+        embed.add_field(name="Up Next", value="Nothing — queue is empty", inline=False)
+
+    if song.thumbnail:
+        embed.set_thumbnail(url=song.thumbnail)
+
+    embed.set_footer(text=f"{len(entries)} song(s) in queue")
+    return embed
+
+
+class NowPlayingView(discord.ui.View):
+    """Persistent buttons attached to the now-playing panel."""
+
+    def __init__(self, cog: "Music", guild_id: int):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Pause", style=discord.ButtonStyle.secondary, emoji="\u23F8\uFE0F")
+    async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = interaction.guild.voice_client
+        if not vc:
+            await interaction.response.send_message("Not connected.", ephemeral=True)
+            return
+
+        gq = queue_manager.get(self.guild_id)
+        if vc.is_playing():
+            vc.pause()
+            button.label = "Resume"
+            button.emoji = "\u25B6\uFE0F"
+            embed = _build_now_playing_embed(gq.current, self.guild_id, paused=True)
+            await interaction.response.edit_message(embed=embed, view=self)
+        elif vc.is_paused():
+            vc.resume()
+            button.label = "Pause"
+            button.emoji = "\u23F8\uFE0F"
+            embed = _build_now_playing_embed(gq.current, self.guild_id, paused=False)
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await interaction.response.send_message("Nothing is playing.", ephemeral=True)
+
+    @discord.ui.button(label="Skip", style=discord.ButtonStyle.primary, emoji="\u23ED\uFE0F")
+    async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        gq = queue_manager.get(self.guild_id)
+        vc = interaction.guild.voice_client
+        if not vc or not (vc.is_playing() or vc.is_paused()):
+            await interaction.response.send_message("Nothing is playing.", ephemeral=True)
+            return
+        title = gq.current.title if gq.current else "Unknown"
+        gq.skip()
+        await interaction.response.send_message(f"Skipped: **{title}**")
+
+
 class Music(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -45,6 +124,7 @@ class Music(commands.Cog):
         elif vc.channel != channel:
             await vc.move_to(channel)
         gq.voice_client = vc
+        gq.text_channel = interaction.channel
         return vc
 
     async def _play_next(self, guild_id: int) -> None:
@@ -86,6 +166,24 @@ class Music(commands.Cog):
                 print(f"[after callback error] {exc}")
 
         gq.voice_client.play(source, after=after_playing)
+        await self._send_now_playing(guild_id)
+
+    async def _send_now_playing(self, guild_id: int) -> None:
+        """Send (or replace) the now-playing panel in the text channel."""
+        gq = queue_manager.get(guild_id)
+        if not gq.current or not gq.text_channel:
+            return
+
+        # Delete the previous panel so chat stays clean
+        if gq.now_playing_message:
+            try:
+                await gq.now_playing_message.delete()
+            except discord.HTTPException:
+                pass
+
+        embed = _build_now_playing_embed(gq.current, guild_id)
+        view = NowPlayingView(self, guild_id)
+        gq.now_playing_message = await gq.text_channel.send(embed=embed, view=view)
 
     # ------------------------------------------------------------------
     # Commands
@@ -170,16 +268,9 @@ class Music(commands.Cog):
             await interaction.followup.send(embed=embed)
         else:
             await self._play_next(interaction.guild_id)
-            embed = discord.Embed(
-                title="Now Playing",
-                description=f"**{entry.title}**",
-                color=discord.Color.green(),
+            await interaction.followup.send(
+                f"Started playing **{entry.title}**", silent=True
             )
-            embed.add_field(name="Duration", value=_fmt_duration(entry.duration))
-            embed.add_field(name="Requested by", value=interaction.user.mention)
-            if entry.thumbnail:
-                embed.set_thumbnail(url=entry.thumbnail)
-            await interaction.followup.send(embed=embed)
 
     @app_commands.command(
         name="playnext",
@@ -222,16 +313,9 @@ class Music(commands.Cog):
             # Nothing playing — just start it
             gq.add(entry)
             await self._play_next(interaction.guild_id)
-            embed = discord.Embed(
-                title="Now Playing",
-                description=f"**{entry.title}**",
-                color=discord.Color.green(),
+            await interaction.followup.send(
+                f"Started playing **{entry.title}**", silent=True
             )
-            embed.add_field(name="Duration", value=_fmt_duration(entry.duration))
-            embed.add_field(name="Requested by", value=interaction.user.mention)
-            if entry.thumbnail:
-                embed.set_thumbnail(url=entry.thumbnail)
-            await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="skip", description="Skip the current song")
     async def skip(self, interaction: discord.Interaction):
@@ -249,6 +333,13 @@ class Music(commands.Cog):
     @app_commands.command(name="stop", description="Stop playback and clear the queue")
     async def stop(self, interaction: discord.Interaction):
         gq = queue_manager.get(interaction.guild_id)
+        # Clean up the now-playing panel
+        if gq.now_playing_message:
+            try:
+                await gq.now_playing_message.delete()
+            except discord.HTTPException:
+                pass
+            gq.now_playing_message = None
         gq.clear()
         vc = interaction.guild.voice_client
         if vc:
@@ -262,7 +353,14 @@ class Music(commands.Cog):
         vc = interaction.guild.voice_client
         if vc and vc.is_playing():
             vc.pause()
-            await interaction.response.send_message("Paused.")
+            gq = queue_manager.get(interaction.guild_id)
+            if gq.now_playing_message and gq.current:
+                embed = _build_now_playing_embed(gq.current, interaction.guild_id, paused=True)
+                try:
+                    await gq.now_playing_message.edit(embed=embed)
+                except discord.HTTPException:
+                    pass
+            await interaction.response.send_message("Paused.", ephemeral=True)
         else:
             await interaction.response.send_message(
                 "Nothing is playing.", ephemeral=True
@@ -273,7 +371,14 @@ class Music(commands.Cog):
         vc = interaction.guild.voice_client
         if vc and vc.is_paused():
             vc.resume()
-            await interaction.response.send_message("Resumed.")
+            gq = queue_manager.get(interaction.guild_id)
+            if gq.now_playing_message and gq.current:
+                embed = _build_now_playing_embed(gq.current, interaction.guild_id, paused=False)
+                try:
+                    await gq.now_playing_message.edit(embed=embed)
+                except discord.HTTPException:
+                    pass
+            await interaction.response.send_message("Resumed.", ephemeral=True)
         else:
             await interaction.response.send_message(
                 "Playback is not paused.", ephemeral=True
@@ -287,17 +392,12 @@ class Music(commands.Cog):
                 "Nothing is playing right now.", ephemeral=True
             )
             return
-        song = gq.current
-        embed = discord.Embed(
-            title="Now Playing",
-            description=f"**{song.title}**",
-            color=discord.Color.green(),
-        )
-        embed.add_field(name="Duration", value=_fmt_duration(song.duration))
-        embed.add_field(name="Requested by", value=song.requester.mention)
-        if song.thumbnail:
-            embed.set_thumbnail(url=song.thumbnail)
-        await interaction.response.send_message(embed=embed)
+        vc = interaction.guild.voice_client
+        paused = vc.is_paused() if vc else False
+        embed = _build_now_playing_embed(gq.current, interaction.guild_id, paused=paused)
+        view = NowPlayingView(self, interaction.guild_id)
+        gq.text_channel = interaction.channel
+        await interaction.response.send_message(embed=embed, view=view)
 
     @app_commands.command(name="queue", description="Show the current queue")
     async def queue_cmd(self, interaction: discord.Interaction):

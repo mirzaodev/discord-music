@@ -20,6 +20,8 @@ class GuildQueue:
         self._queue: deque[SongEntry] = deque()
         self.current: Optional[SongEntry] = None
         self.voice_client: Optional[discord.VoiceClient] = None
+        self.now_playing_message: Optional[discord.Message] = None
+        self.text_channel: Optional[discord.abc.Messageable] = None
         self._lock: asyncio.Lock = asyncio.Lock()
 
     def add(self, entry: SongEntry) -> None:
