@@ -5,6 +5,7 @@ from discord import app_commands
 
 import config
 import database as db
+import cache_manager
 
 
 intents = discord.Intents.default()
@@ -16,6 +17,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     db.init_db()
+    cache_manager.ensure_cache_dir()
     if config.GUILD_ID:
         guild = discord.Object(id=config.GUILD_ID)
         bot.tree.copy_global_to(guild=guild)

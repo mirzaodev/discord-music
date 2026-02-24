@@ -43,6 +43,19 @@ def init_db() -> None:
 
         CREATE INDEX IF NOT EXISTS idx_playlists_guild ON playlists(guild_id);
         CREATE INDEX IF NOT EXISTS idx_songs_playlist ON playlist_songs(playlist_id, position);
+
+        CREATE TABLE IF NOT EXISTS audio_cache (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            url         TEXT    NOT NULL UNIQUE,
+            file_path   TEXT    NOT NULL,
+            title       TEXT    NOT NULL,
+            duration    INTEGER DEFAULT 0,
+            file_size   INTEGER DEFAULT 0,
+            cached_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+            last_played TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cache_url ON audio_cache(url);
     """)
     conn.commit()
 
@@ -139,3 +152,58 @@ def get_playlist_songs(playlist_id: int) -> list:
         "SELECT * FROM playlist_songs WHERE playlist_id = ? ORDER BY position",
         (playlist_id,),
     ).fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Audio cache CRUD
+# ---------------------------------------------------------------------------
+
+def get_cached_track(url: str) -> Optional[sqlite3.Row]:
+    conn = _get_conn()
+    return conn.execute(
+        "SELECT * FROM audio_cache WHERE url = ?", (url,)
+    ).fetchone()
+
+
+def upsert_cached_track(
+    url: str, file_path: str, title: str, duration: int, file_size: int
+) -> None:
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO audio_cache (url, file_path, title, duration, file_size) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(url) DO UPDATE SET "
+        "file_path=excluded.file_path, title=excluded.title, "
+        "duration=excluded.duration, file_size=excluded.file_size, "
+        "last_played=datetime('now')",
+        (url, file_path, title, duration, file_size),
+    )
+    conn.commit()
+
+
+def touch_cached_track(url: str) -> None:
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE audio_cache SET last_played = datetime('now') WHERE url = ?",
+        (url,),
+    )
+    conn.commit()
+
+
+def delete_cached_track(url: str) -> None:
+    conn = _get_conn()
+    conn.execute("DELETE FROM audio_cache WHERE url = ?", (url,))
+    conn.commit()
+
+
+def get_all_cached_tracks() -> list:
+    conn = _get_conn()
+    return conn.execute(
+        "SELECT * FROM audio_cache ORDER BY last_played ASC"
+    ).fetchall()
+
+
+def get_total_cache_size() -> int:
+    conn = _get_conn()
+    row = conn.execute("SELECT COALESCE(SUM(file_size), 0) AS total FROM audio_cache").fetchone()
+    return row["total"]

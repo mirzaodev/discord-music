@@ -10,6 +10,9 @@ music.db
 music.db-wal
 music.db-shm
 
+# Audio cache
+audio_cache/
+
 # Python
 __pycache__/
 *.py[cod]
