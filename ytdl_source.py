@@ -30,6 +30,10 @@ FFMPEG_OPTIONS = {
 
 
 _YTDL_PLAYLIST_OPTIONS = {**_YTDL_OPTIONS, "noplaylist": False, "ignoreerrors": True}
+_YTDL_FLAT_PLAYLIST_OPTIONS = {
+    **_YTDL_PLAYLIST_OPTIONS,
+    "extract_flat": True,      # only fetch URLs + basic metadata, no per-track resolution
+}
 
 
 def _extract_info(query: str) -> dict:
@@ -43,6 +47,14 @@ def _extract_info(query: str) -> dict:
 def _extract_playlist(url: str) -> dict:
     """Extract info with playlist support enabled."""
     data = yt_dlp.YoutubeDL(_YTDL_PLAYLIST_OPTIONS).extract_info(url, download=False)
+    if data is None:
+        raise ValueError(f"Could not retrieve playlist for: {url}")
+    return data
+
+
+def _extract_playlist_flat(url: str) -> dict:
+    """Flat-extract: grab URLs + basic metadata without resolving each track."""
+    data = yt_dlp.YoutubeDL(_YTDL_FLAT_PLAYLIST_OPTIONS).extract_info(url, download=False)
     if data is None:
         raise ValueError(f"Could not retrieve playlist for: {url}")
     return data
@@ -121,14 +133,15 @@ class YTDLSource(discord.PCMVolumeTransformer):
         loop: asyncio.AbstractEventLoop = None,
     ) -> list[dict]:
         """
-        Extract metadata for every track in a playlist URL.
+        Flat-extract metadata for every track in a playlist URL.
+        Uses extract_flat to avoid resolving each track individually,
+        which prevents GIL contention that causes audio stuttering.
         Returns a list of dicts with title/url/duration/thumbnail.
-        Skips entries that failed to resolve (private, geo-blocked, etc.).
         """
         loop = loop or asyncio.get_event_loop()
         data = await loop.run_in_executor(
             None,
-            lambda: _extract_playlist(url),
+            lambda: _extract_playlist_flat(url),
         )
         entries = data.get("entries") or []
         results = []
