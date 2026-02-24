@@ -1,5 +1,7 @@
 import asyncio
-import copy
+import json
+import subprocess
+import sys
 import os
 import discord
 import yt_dlp
@@ -30,10 +32,6 @@ FFMPEG_OPTIONS = {
 
 
 _YTDL_PLAYLIST_OPTIONS = {**_YTDL_OPTIONS, "noplaylist": False, "ignoreerrors": True}
-_YTDL_FLAT_PLAYLIST_OPTIONS = {
-    **_YTDL_PLAYLIST_OPTIONS,
-    "extract_flat": True,      # only fetch URLs + basic metadata, no per-track resolution
-}
 
 
 def _extract_info(query: str) -> dict:
@@ -44,20 +42,29 @@ def _extract_info(query: str) -> dict:
     return data
 
 
-def _extract_playlist(url: str) -> dict:
-    """Extract info with playlist support enabled."""
-    data = yt_dlp.YoutubeDL(_YTDL_PLAYLIST_OPTIONS).extract_info(url, download=False)
-    if data is None:
-        raise ValueError(f"Could not retrieve playlist for: {url}")
-    return data
-
-
-def _extract_playlist_flat(url: str) -> dict:
-    """Flat-extract: grab URLs + basic metadata without resolving each track."""
-    data = yt_dlp.YoutubeDL(_YTDL_FLAT_PLAYLIST_OPTIONS).extract_info(url, download=False)
-    if data is None:
-        raise ValueError(f"Could not retrieve playlist for: {url}")
-    return data
+# Helper script run as a subprocess for playlist extraction.
+# Running in a separate process avoids GIL contention that causes audio stutter.
+_PLAYLIST_WORKER = """
+import json, sys, yt_dlp
+opts = json.loads(sys.argv[1])
+url  = sys.argv[2]
+data = yt_dlp.YoutubeDL(opts).extract_info(url, download=False)
+if data is None:
+    print(json.dumps({"entries": []}))
+    sys.exit(0)
+entries = data.get("entries") or []
+results = []
+for e in entries:
+    if e is None:
+        continue
+    results.append({
+        "title": e.get("title", "Unknown"),
+        "url":   e.get("webpage_url") or e.get("url"),
+        "duration": int(e.get("duration") or 0),
+        "thumbnail": e.get("thumbnail", ""),
+    })
+print(json.dumps(results))
+"""
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
@@ -133,25 +140,20 @@ class YTDLSource(discord.PCMVolumeTransformer):
         loop: asyncio.AbstractEventLoop = None,
     ) -> list[dict]:
         """
-        Flat-extract metadata for every track in a playlist URL.
-        Uses extract_flat to avoid resolving each track individually,
-        which prevents GIL contention that causes audio stuttering.
+        Extract metadata for every track in a playlist URL.
+        Runs yt-dlp in a separate *process* to avoid GIL contention
+        that causes audio stuttering during long extractions.
         Returns a list of dicts with title/url/duration/thumbnail.
         """
-        loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(
-            None,
-            lambda: _extract_playlist_flat(url),
+        opts_json = json.dumps(_YTDL_PLAYLIST_OPTIONS)
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-c", _PLAYLIST_WORKER, opts_json, url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        entries = data.get("entries") or []
-        results = []
-        for entry in entries:
-            if entry is None:
-                continue
-            results.append({
-                "title": entry.get("title", "Unknown"),
-                "url": entry.get("webpage_url") or entry.get("url"),
-                "duration": int(entry.get("duration") or 0),
-                "thumbnail": entry.get("thumbnail", ""),
-            })
-        return results
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise ValueError(
+                f"Playlist extraction failed: {stderr.decode(errors='replace')}"
+            )
+        return json.loads(stdout.decode())
