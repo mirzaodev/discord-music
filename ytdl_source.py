@@ -4,7 +4,7 @@ import discord
 import yt_dlp
 
 _YTDL_OPTIONS = {
-    "format": "bestaudio/best",
+    "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
     "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
     "restrictfilenames": True,
     "noplaylist": True,
@@ -15,6 +15,7 @@ _YTDL_OPTIONS = {
     "no_warnings": True,
     "default_search": "ytsearch",
     "source_address": "0.0.0.0",   # bind to IPv4, avoids IPv6 issues on some VPS
+    "geo_bypass": True,
 }
 
 _cookies = os.environ.get("COOKIES_FILE")
