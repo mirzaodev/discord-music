@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=mirza
-WorkingDirectory=/home/mirza/dev/discord-music
-ExecStart=/home/mirza/dev/discord-music/.venv/bin/python3 /home/mirza/dev/discord-music/bot.py
+User=mirza258
+WorkingDirectory=/home/mirza258/discord-music
+ExecStart=/home/mirza258/discord-music/.venv/bin/python3 /home/mirza258/discord-music/bot.py
 Restart=on-failure
 RestartSec=10s
 StandardOutput=journal
