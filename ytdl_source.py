@@ -1,10 +1,12 @@
 import asyncio
+import copy
 import os
 import discord
 import yt_dlp
+from yt_dlp.utils import DownloadError
 
 _YTDL_OPTIONS = {
-    "format": "18/22/best",
+    "format": "bestaudio/best",
     "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
     "restrictfilenames": True,
     "noplaylist": True,
@@ -36,7 +38,53 @@ FFMPEG_OPTIONS = {
     "options": "-vn",
 }
 
-ytdl = yt_dlp.YoutubeDL(_YTDL_OPTIONS)
+def _extract_info_with_fallback(query: str) -> dict:
+    """
+    Try multiple yt-dlp option profiles to survive YouTube format/client
+    breakages. Raises the last error if all profiles fail.
+    """
+    profiles = [
+        {
+            "format": "bestaudio/best",
+            "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
+        },
+        {
+            "format": "bestaudio*/best",
+            "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
+        },
+        {
+            "format": "best",
+            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+        },
+        {
+            "format": "best",
+            "extractor_args": {},
+        },
+    ]
+
+    last_error = None
+    for profile in profiles:
+        opts = copy.deepcopy(_YTDL_OPTIONS)
+        opts["format"] = profile["format"]
+        if profile["extractor_args"]:
+            opts["extractor_args"] = profile["extractor_args"]
+        else:
+            opts.pop("extractor_args", None)
+
+        try:
+            return yt_dlp.YoutubeDL(opts).extract_info(query, download=False)
+        except DownloadError as exc:
+            last_error = exc
+            message = str(exc)
+            if "Requested format is not available" not in message:
+                continue
+        except Exception as exc:
+            last_error = exc
+            continue
+
+    if last_error:
+        raise last_error
+    raise ValueError(f"Could not retrieve audio for: {query}")
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
@@ -71,7 +119,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         loop = loop or asyncio.get_event_loop()
         data = await loop.run_in_executor(
             None,
-            lambda: ytdl.extract_info(query, download=False),
+            lambda: _extract_info_with_fallback(query),
         )
         if data is None:
             raise ValueError(f"Could not retrieve audio for: {query}")
@@ -96,7 +144,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         loop = loop or asyncio.get_event_loop()
         data = await loop.run_in_executor(
             None,
-            lambda: ytdl.extract_info(query, download=False),
+            lambda: _extract_info_with_fallback(query),
         )
         if data is None:
             raise ValueError(f"Nothing found for: {query}")
