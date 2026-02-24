@@ -13,7 +13,6 @@ class SongEntry:
     duration: int      # seconds
     requester: discord.Member
     thumbnail: Optional[str] = None
-    source: str = "YouTube"  # "YouTube" or "SoundCloud"
 
 
 class GuildQueue:
