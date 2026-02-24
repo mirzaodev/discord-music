@@ -1,8 +1,9 @@
 import asyncio
+import os
 import discord
 import yt_dlp
 
-YTDL_OPTIONS = {
+_YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
     "restrictfilenames": True,
@@ -16,6 +17,10 @@ YTDL_OPTIONS = {
     "source_address": "0.0.0.0",   # bind to IPv4, avoids IPv6 issues on some VPS
 }
 
+_cookies = os.environ.get("COOKIES_FILE")
+if _cookies and os.path.isfile(_cookies):
+    _YTDL_OPTIONS["cookiefile"] = _cookies
+
 FFMPEG_OPTIONS = {
     "before_options": (
         "-reconnect 1 "
@@ -25,7 +30,7 @@ FFMPEG_OPTIONS = {
     "options": "-vn",
 }
 
-ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+ytdl = yt_dlp.YoutubeDL(_YTDL_OPTIONS)
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
