@@ -4,7 +4,7 @@ import discord
 import yt_dlp
 
 _YTDL_OPTIONS = {
-    "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio*/best",
+    "format": "18/22/best",
     "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
     "restrictfilenames": True,
     "noplaylist": True,
