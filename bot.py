@@ -16,9 +16,15 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     db.init_db()
-    await bot.tree.sync()
+    if config.GUILD_ID:
+        guild = discord.Object(id=config.GUILD_ID)
+        bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync(guild=guild)
+        print(f"Slash commands synced to guild {config.GUILD_ID} (instant).")
+    else:
+        await bot.tree.sync()
+        print("Slash commands synced globally (up to 1 hour to propagate).")
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    print("Slash commands synced globally.")
 
 
 @bot.tree.error
